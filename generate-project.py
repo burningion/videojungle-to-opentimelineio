@@ -1,43 +1,59 @@
+import os
+import time
 import opentimelineio as otio
 import opentimelineio.opentime as otio_time
-from videojungle import ApiClient  
-import os 
+from videojungle import ApiClient  # Import the ApiClient from the videojungle library
+import httpx
 
-def create_skateboarding_timeline(api_client: ApiClient, query: str = "skateboarding", limit: int = 10) -> otio.schema.Timeline:
+def create_skateboarding_timeline(api_client: ApiClient, query: str = "skateboarding", limit: int = 10, download_dir: str = "downloads") -> otio.schema.Timeline:
     """
-    Searches for skateboarding videos using the API client and creates an OTIO timeline.
-
+    Searches for skateboarding videos using the ApiClient from the videojungle library, downloads each video file locally,
+    and creates an OTIO timeline that references the local files.
+    
     Args:
-        api_client (ApiClient): An instance of your API client.
-        query (str): The search query (default: "skateboarding").
-        limit (int): Maximum number of videos to include (default: 10).
-
+        api_client (ApiClient): An instance of the videojungle ApiClient.
+        query (str): The search query (default "skateboarding").
+        limit (int): Maximum number of videos to process.
+        download_dir (str): Local directory to store downloaded video files.
+    
     Returns:
-        otio.schema.Timeline: The generated timeline containing the found clips.
+        otio.schema.Timeline: The constructed OTIO timeline.
     """
-    # Perform the search for skateboarding videos.
+    # Ensure the download directory exists.
+    if not os.path.exists(download_dir):
+        os.makedirs(download_dir)
+    
+    # Search for skateboarding videos.
     search_results = api_client.video_files.search(query=query, limit=limit)
     
     # Create a video track for the timeline.
     video_track = otio.schema.Track(name="Skateboarding Videos", kind="Video")
-    print(f"search results: {search_results}")
+    
     for video_data in search_results:
         # Retrieve detailed video information.
         video = api_client.video_files.get(video_data["video_id"])
-        
-        # Determine fps and duration (using defaults if necessary).
+        print(f"Processing video: {video.id}")
+        # Determine a local filename for the download.
+        local_file = os.path.join(download_dir, f"{video.name}.mp4")
+        os.makedirs(download_dir, exist_ok=True)
+        if not video.download_url:
+            print(f"Skipping video {video.id} - no download URL provided")
+            continue
+
+        lf = api_client.video_files.download(video.id, local_file)
+        print(f"Downloaded video to {lf}")
+        # Determine FPS and duration (using defaults if necessary).
         fps = video.fps if video.fps else 24.0
-        duration_secs = video.duration if video.duration else 10.0  # Default duration if missing
+        duration_secs = video.duration if video.duration else 10.0
         
-        # Create a source range starting at 0 with the given duration.
+        # Build a source range for the clip.
         start_time = otio_time.RationalTime(0, fps)
         clip_duration = otio_time.RationalTime(duration_secs, fps)
         
-        # Build an external reference to the media.
-        # Adjust the target_url as needed (e.g., a URL or file path to your video).
-        media_ref = otio.schema.ExternalReference(target_url=video.filename)
+        # Create an external reference using the local file path.
+        media_ref = otio.schema.ExternalReference(target_url=os.path.abspath(local_file))
         
-        # Create an OTIO clip with the media reference and source range.
+        # Create the clip with a name and media reference.
         clip = otio.schema.Clip(
             name=video.name,
             media_reference=media_ref,
@@ -52,8 +68,8 @@ def create_skateboarding_timeline(api_client: ApiClient, query: str = "skateboar
 
 def main():
     # Replace with your actual API token.
-    
-    client = ApiClient(os.environ["VJ_API_KEY"])
+    import os
+    client = ApiClient(os.environ.get("VJ_API_KEY"))
     
     # Create the OTIO timeline for skateboarding videos.
     timeline = create_skateboarding_timeline(client, query="skateboarding", limit=10)
